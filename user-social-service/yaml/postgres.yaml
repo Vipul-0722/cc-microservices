@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-user-service
+  labels:
+    app: postgres-user-service
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres-user-service
+  clusterIP: None 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-user-service
+  labels:
+    app: postgres-user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-user-service
+  template:
+    metadata:
+      labels:
+        app: postgres-user-service
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "campus_connect_users"
+        - name: POSTGRES_USER
+          value: "user_service_admin"
+        - name: POSTGRES_PASSWORD
+          value: "securepassword" 
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres-data
+      volumes:
+      - name: postgres-data
+        emptyDir: {}

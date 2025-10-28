@@ -1,0 +1,4 @@
+kubectl port-forward svc/postgres-user-service 5433:5432 -n campus-connect
+kubectl port-forward svc/campus-kafka-cluster-kafka-bootstrap 9092:9092 -n kafka
+
+

@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-event-service
+  namespace: campus-connect
+  labels:
+    app: postgres-event-service
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres-event-service
+  clusterIP: None 
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-event-service
+  namespace: campus-connect
+  labels:
+    app: postgres-event-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-event-service
+  template:
+    metadata:
+      labels:
+        app: postgres-event-service
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "campus_connect_events" #database name
+        - name: POSTGRES_USER
+          value: "event_service_admin" #database user
+        - name: POSTGRES_PASSWORD
+          value: "securepassword_events" #password 
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres-data
+      volumes:
+      - name: postgres-data
+        emptyDir: {} 

@@ -1,0 +1,48 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: campus-connect-ingress
+  namespace: campus-connect
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # Important for microservices routing
+    # nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: campus-connect.ingress.cc.vg-project.shoot.canary.k8s-hana.ondemand.com
+      http:
+        paths:
+          - path: / #
+            pathType: Prefix
+            backend:
+              service:
+                name: notification-service
+                port:
+                  number: 80
+          # 1. Routing to User Service (USS)
+          - path: /users
+            pathType: Prefix
+            backend:
+              service:
+                name: user-social-service
+                port:
+                  number: 80 # The port the K8s Service exposes (from USS manifest)
+          # 2. Routing to Event Service (EMS)
+          - path: /events
+            pathType: Prefix
+            backend:
+              service:
+                name: event-management-service
+                port:
+                  number: 80 # The port the K8s Service exposes (from EMS manifest)
+          # 3. Routing to Notification Service (RNS)
+          - path: /notifications
+            pathType: Prefix
+            backend:
+              service:
+                name: notification-service
+                port:
+                  number: 80 # The port the K8s Service exposes (from RNS manifest)

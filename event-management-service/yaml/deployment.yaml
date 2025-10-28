@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: event-management-service
+  namespace: campus-connect
+  labels:
+    app: event-management-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 3001
+      protocol: TCP
+  selector:
+    app: event-management-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-management-service
+  namespace: campus-connect
+  labels:
+    app: event-management-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-management-service
+  template:
+    metadata:
+      labels:
+        app: event-management-service
+    spec:
+      containers:
+      - name: ems-app
+        image: vipul710/ems-service:latest
+        ports:
+        - containerPort: 3001
+        env:
+        - name: DB_HOST
+          value: "postgres-event-service" 
+        - name: DB_NAME
+          value: "campus_connect_events"
+        - name: DB_USER
+          value: "event_service_admin"
+        - name: DB_PASSWORD
+          value: "securepassword_events"
+        - name: DB_PORT
+          value: "5432"
+        - name: KAFKA_BROKERS 
+          value: "campus-kafka-cluster-kafka-brokers.kafka.svc.cluster.local:9092"
+        

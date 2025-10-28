@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-rns-service
+  namespace: campus-connect
+  labels:
+    app: postgres-rns-service
+spec:
+  ports:
+    - port: 5432
+  selector:
+    app: postgres-rns-service
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-rns-service
+  namespace: campus-connect
+  labels:
+    app: postgres-rns-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-rns-service
+  template:
+    metadata:
+      labels:
+        app: postgres-rns-service
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          value: "campus_connect_rns"
+        - name: POSTGRES_USER
+          value: "rns_service_admin"
+        - name: POSTGRES_PASSWORD
+          value: "securepassword_rns" 
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: postgres-data
+      volumes:
+      - name: postgres-data
+        emptyDir: {}

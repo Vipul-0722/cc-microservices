@@ -1,0 +1,246 @@
+{
+  "version": "1.0",
+  "name": "Campus Connect Integration Tests",
+  "type": "collection",
+  "environments": [
+    {
+      "name": "Local Development",
+      "variables": [
+        {
+          "name": "USS_BASE_URL",
+          "value": "http://localhost:3000/users"
+        },
+        {
+          "name": "EMS_BASE_URL",
+          "value": "http://localhost:3001/events"
+        },
+        {
+          "name": "USER_A_ID",
+          "value": ""
+        },
+        {
+          "name": "EVENT_ID",
+          "value": ""
+        },
+        {
+          "name": "USER_B_ID",
+          "value": ""
+        }
+      ]
+    }
+  ],
+  "request": [
+    {
+      "name": "01 Register User A (Alice)",
+      "seq": 1,
+      "request": {
+        "url": "{{USS_BASE_URL}}/register",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "type": "json",
+          "json": {
+            "username": "Alice_Dev",
+            "email": "alice@dev.edu",
+            "password": "SecurePassword123"
+          }
+        },
+        "script": {
+          "post_response": "// Save USER_A_ID for subsequent requests\nif (res.status === 201) {\n  bru.setEnvVar('USER_A_ID', res.body.user_id);\n  console.log('User A ID:', res.body.user_id);\n}"
+        },
+        "tests": [
+          {
+            "name": "Status code is 201",
+            "expr": "res.status === 201"
+          }
+        ]
+      }
+    },
+    {
+      "name": "02 Register User B (Club)",
+      "seq": 2,
+      "request": {
+        "url": "{{USS_BASE_URL}}/register",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "type": "json",
+          "json": {
+            "username": "Robotics_Club",
+            "email": "robotics@club.edu",
+            "password": "ClubPassword123",
+            "is_organization": true
+          }
+        },
+        "script": {
+          "post_response": "// Save USER_B_ID for follow tests\nif (res.status === 201) {\n  bru.setEnvVar('USER_B_ID', res.body.user_id);\n  console.log('User B ID:', res.body.user_id);\n}"
+        },
+        "tests": [
+          {
+            "name": "Status code is 201",
+            "expr": "res.status === 201"
+          }
+        ]
+      }
+    },
+    {
+      "name": "03 Create Event (Authorized)",
+      "seq": 3,
+      "request": {
+        "url": "{{EMS_BASE_URL}}",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-User-ID": "{{USER_B_ID}}"
+        },
+        "body": {
+          "type": "json",
+          "json": {
+            "title": "Robotics Q4 Planning Meeting",
+            "description": "Planning the next quarter's project calendar.",
+            "date_time": "2026-01-15T10:00:00Z",
+            "location": "Engineering Lab 404"
+          }
+        },
+        "script": {
+          "post_response": "// Save Event ID and check Kafka log\nif (res.status === 201) {\n  bru.setEnvVar('EVENT_ID', res.body.event_id);\n  console.log('Event ID created:', res.body.event_id);\n}"
+        },
+        "tests": [
+          {
+            "name": "Status code is 201",
+            "expr": "res.status === 201"
+          }
+        ]
+      }
+    },
+    {
+      "name": "04 Update Event (Authorized)",
+      "seq": 4,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}",
+        "method": "PUT",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-User-ID": "{{USER_B_ID}}"
+        },
+        "body": {
+          "type": "json",
+          "json": {
+            "location": "Zoom Meeting Link",
+            "title": "Robotics Q4 Planning (Location Online)"
+          }
+        },
+        "tests": [
+          {
+            "name": "Status code is 200",
+            "expr": "res.status === 200"
+          }
+        ]
+      }
+    },
+    {
+      "name": "05 Update Event (Unauthorized)",
+      "seq": 5,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}",
+        "method": "PUT",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-User-ID": "{{USER_A_ID}}"
+        },
+        "body": {
+          "type": "json",
+          "json": {
+            "location": "Secret Location"
+          }
+        },
+        "tests": [
+          {
+            "name": "Status code is 403 Forbidden",
+            "expr": "res.status === 403"
+          }
+        ]
+      }
+    },
+    {
+      "name": "06 RSVP (Join) Event",
+      "seq": 6,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}/rsvp",
+        "method": "POST",
+        "headers": {
+          "X-User-ID": "{{USER_A_ID}}"
+        },
+        "body": {
+          "type": "none"
+        },
+        "tests": [
+          {
+            "name": "Status code is 200",
+            "expr": "res.status === 200"
+          }
+        ]
+      }
+    },
+    {
+      "name": "07 Verify Attendee Count (Should Be 1)",
+      "seq": 7,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}",
+        "method": "GET",
+        "headers": {},
+        "body": {
+          "type": "none"
+        },
+        "tests": [
+          {
+            "name": "Count is 1",
+            "expr": "res.body.attendees_count === 1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "08 Cancel RSVP",
+      "seq": 8,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}/rsvp",
+        "method": "DELETE",
+        "headers": {
+          "X-User-ID": "{{USER_A_ID}}"
+        },
+        "body": {
+          "type": "none"
+        },
+        "tests": [
+          {
+            "name": "Status code is 200",
+            "expr": "res.status === 200"
+          }
+        ]
+      }
+    },
+    {
+      "name": "09 Verify Attendee Count (Should Be 0)",
+      "seq": 9,
+      "request": {
+        "url": "{{EMS_BASE_URL}}/{{EVENT_ID}}",
+        "method": "GET",
+        "headers": {},
+        "body": {
+          "type": "none"
+        },
+        "tests": [
+          {
+            "name": "Count is 0",
+            "expr": "res.body.attendees_count === 0"
+          }
+        ]
+      }
+    }
+  ]
+}
