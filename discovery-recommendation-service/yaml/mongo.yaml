@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-drs-service
+  namespace: campus-connect
+  labels:
+    app: mongodb-drs
+spec:
+  ports:
+    - port: 27017
+      targetPort: 27017
+  selector:
+    app: mongodb-drs
+  clusterIP: None # Headless service for simplified access
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-drs-deployment
+  namespace: campus-connect
+  labels:
+    app: mongodb-drs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-drs
+  template:
+    metadata:
+      labels:
+        app: mongodb-drs
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:5.0-focal # Use a stable, non-alpine image for robust MongoDB functionality
+          ports:
+            - containerPort: 27017
+          env:
+            # Define the database name to be used by the DRS microservice
+            - name: MONGO_INITDB_DATABASE
+              value: "campus_connect_drs"
+          # NOTE: Authentication (user/password) is highly recommended for production
+          volumeMounts:
+            - mountPath: /data/db
+              name: mongo-data
+      volumes:
+        - name: mongo-data
+          # Use ephemeral storage for non-critical, easily rebuilt data
+          emptyDir: {}

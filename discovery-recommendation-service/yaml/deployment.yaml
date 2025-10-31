@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: discovery-recommendation-service
+  namespace: campus-connect
+  labels:
+    app: discovery-recommendation-service
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 3003
+      protocol: TCP
+  selector:
+    app: discovery-recommendation-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery-recommendation-service
+  namespace: campus-connect
+  labels:
+    app: discovery-recommendation-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: discovery-recommendation-service
+  template:
+    metadata:
+      labels:
+        app: discovery-recommendation-service
+    spec:
+      containers:
+        - name: drs-app
+          image: vipul710/drs-service:latest
+          ports:
+            - containerPort: 3003
+          env:
+            - name: MONGO_URI
+              value: "mongodb://mongodb-drs-service.campus-connect.svc.cluster.local:27017/campus_connect_drs"
+
+            # --- REDIS CONFIG (Shared Cache) ---
+            - name: REDIS_HOST
+              value: "redis-cache.redis.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+
+            # --- KAFKA CONFIG ---
+            - name: KAFKA_BROKERS
+              value: "campus-kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"
