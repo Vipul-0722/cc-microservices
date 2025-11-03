@@ -1,25 +1,42 @@
 const { ApolloServer } = require("@apollo/server");
 const { expressMiddleware } = require("@apollo/server/express4");
 const express = require("express");
-const axios = require("axios"); // For making REST calls to other MS
+const axios = require("axios");
 const gql = require("graphql-tag");
 
-const USS_URL = process.env.USS_URL || "http://user-social-service:80/users";
-const EMS_URL =
-  process.env.EMS_URL || "http://event-management-service:80/events";
-const DRS_URL =
-  process.env.DRS_URL ||
-  "http://discovery-recommendation-service:80/recommendations";
 
+// --- CONFIGURATION (Internal Service Addresses) ---
+const USS_URL = process.env.USS_URL || "http://user-social-service:80";
+const EMS_URL = process.env.EMS_URL || "http://event-management-service:80";
+const DRS_URL =
+  process.env.DRS_URL || "http://discovery-recommendation-service:80";
+
+// --- HELPER FUNCTION: Standardizes User data output ---
+const mapUser = (data) => ({
+  id: data.user_id || data.id,
+  username: data.username,
+  // bio: data.bio,
+  isOrganization: data.is_organization ?? false,
+  followersCount: data.followers_count ?? 0,
+});
+
+
+// --- TYPE DEFINITIONS (SCHEMA) ---
 const typeDefs = gql`
   # 1. Base Types (User and Organization)
   type User {
     id: ID!
     username: String!
+    bio: String
     isOrganization: Boolean!
     followersCount: Int
-    following: [User]
+    # Note: 'following' resolver is omitted for brevity but would require a separate REST call
+    # following: [User] 
     recommendations: [Event!]
+    
+    # NEW FIELDS FOR USER DASHBOARD:
+    attendingEvents: [Event!]
+    createdEvents: [Event!]
   }
 
   # 2. Event Types
@@ -31,27 +48,17 @@ const typeDefs = gql`
     dateTime: String!
     attendeesCount: Int
     host: User! # Nested Type (The host's full public profile)
+    isAttending(requesterId: ID!): Boolean! # <--- NEW FIELD FOR RSVP CHECK
   }
 
   # 3. Root Queries (Entry Points)
   type Query {
-    # Fetches a specific event and allows nested data
     event(id: ID!): Event
-    # Fetches a user's profile and allows nested data
     user(id: ID!): User
-    # Fetches the globally trending events from the DRS
     trendingEvents: [Event!]
-    # Searches for events using REST logic but returns GraphQL structure
     searchEvents(query: String): [Event!]
   }
 `;
-
-const mapUser = (user) => ({
-  id: user.user_id || user.id,
-  username: user.username,
-  isOrganization: user.isOrganization ?? false,
-  //   bio: user?.bio || null,
-});
 
 // --- RESOLVER LOGIC (DATA FETCHING) ---
 const resolvers = {
@@ -59,7 +66,7 @@ const resolvers = {
     // 1. Fetch Event by ID (Calls EMS)
     event: async (_, { id }) => {
       try {
-        const response = await axios.get(`${EMS_URL}/${id}`);
+        const response = await axios.get(`${EMS_URL}/events/${id}`);
         return response.data;
       } catch (e) {
         console.error("EMS Event Fetch Failed:", e.message);
@@ -70,49 +77,22 @@ const resolvers = {
     // 2. Fetch User by ID (Calls USS)
     user: async (_, { id }) => {
       try {
-        const response = await axios.get(`${USS_URL}/${id}`);
-        return response.data;
+        // USS URL structure: /users/:id
+        const response = await axios.get(`${USS_URL}/users/${id}`);
+        return mapUser(response.data); // Use mapper to standardize output
       } catch (e) {
         console.error("USS User Fetch Failed:", e.message);
         throw new Error(`Failed to fetch user with ID ${id}`);
       }
     },
 
-    // 3. Trending Events (Calls DRS)
+    // 3. Trending Events (Calls DRS, then calls EMS for detail)
     trendingEvents: async () => {
       try {
-        const response = await axios.get(`${DRS_URL}/trending`);
-        const trendingEventIds = response.data.results;
+        const summaryResponse = await axios.get(`${DRS_URL}/recommendations/trending`);
+        const eventSummaries = summaryResponse.data.results;
+        return eventSummaries
 
-        // Fetch full event details for each trending event
-        const eventPromises = trendingEventIds.map(async (eventSummary) => {
-          try {
-            const eventResponse = await axios.get(
-              `${EMS_URL}/${eventSummary.id}`
-            );
-            return eventResponse.data;
-          } catch (e) {
-            console.error(
-              `Failed to fetch event details for ${eventSummary.id}:`,
-              e.message
-            );
-            // Return the basic data from DRS if EMS call fails
-            return {
-              id: eventSummary.id,
-              title: eventSummary.title,
-              description: null,
-              location: null,
-              dateTime: null,
-              attendeesCount: eventSummary.rsvps || 0,
-              host_id: eventSummary.host_id,
-            };
-          }
-        });
-
-        const fullEvents = await Promise.all(eventPromises);
-        return fullEvents;
-        // // The DRS returns {results: [...]}, we return the array.
-        // return response.data.results;
       } catch (e) {
         console.error("DRS Trending Fetch Failed:", e.message);
         return [];
@@ -121,54 +101,105 @@ const resolvers = {
 
     // 4. Search Events (Calls EMS REST endpoint)
     searchEvents: async (_, { query }) => {
-      try {
-        const response = await axios.get(`${EMS_URL}/search?query=${query}`);
-        return response.data;
-      } catch (e) {
-        console.error("EMS Search Failed:", e.message);
-        return [];
-      }
-    },
+        try {
+            const response = await axios.get(`${EMS_URL}/events/search?query=${query}`);
+            // console.log(response,"data returned..from search")
+            return response.data;
+        } catch (e) {
+            console.error("EMS Search Failed:", e.message);
+            return [];
+        }
+    }
   },
 
-  // --- NESTED RESOLVERS (API COMPOSITION) ---
-
   Event: {
-    // Resolver for 'host' field: takes data from the parent Event object (which has host_id)
-    // and fetches the full profile from USS.
+    id: (parent) => parent.event_id || parent.id,
+    dateTime: (parent) => parent.date_time,
+    attendeesCount : (parent) => parent.attendees_count,
     host: async (parent) => {
-      // Parent is the Event object returned from EMS ({id: ..., host_id: 'uuid'})
       const hostId = parent.host_id;
       if (!hostId) return null;
       try {
-        const response = await axios.get(`${USS_URL}/${hostId}`);
-        return mapUser(response.data);
-        // return response.data; // Returns the User object to the GraphQL response
+        const response = await axios.get(`${USS_URL}/users/${hostId}`);
+        return mapUser(response.data); 
       } catch (e) {
         console.error(`Error fetching host profile ${hostId}:`, e.message);
         return null;
       }
     },
+    
+    // Resolver for 'isAttending': Checks user's RSVP status via EMS
+    isAttending: async (parent, args) => {
+        const eventId = parent.event_id || parent.id;
+        const requesterId = args.requesterId; 
+
+        if (!requesterId) return false; 
+        
+        try {
+            const response = await axios.get(
+                `${EMS_URL}/events/${eventId}/rsvp-status`,
+                { headers: { 'X-User-ID': requesterId } }
+            );
+            return response.data.isRsvped;
+        } catch (e) {
+            console.error(`Error checking attendance for ${requesterId} on event ${eventId}:`, e.message);
+            return false;
+        }
+    }
   },
 
   User: {
-    // Resolver for 'recommendations' field: calls the DRS using the parent User's ID
     recommendations: async (parent) => {
-      // Parent is the User object returned from USS ({id: 'uuid', username: '...' })
-      const userId = parent.user_id || parent.id; // Handles various ID formats
+      const userId = parent.user_id || parent.id; 
       if (!userId) return [];
       try {
-        const response = await axios.get(`${DRS_URL}/${userId}`);
-        return mapUser(response.data.results);
-        // return response.data.results;
+        const response = await axios.get(`${DRS_URL}/recommendations/${userId}`);
+        const eventSummaries = response.data.results || [];
+
+        const eventPromises = eventSummaries.map(async (summary) => {
+            try {
+                const detailResponse = await axios.get(`${EMS_URL}/events/${summary.id || summary.event_id}`);
+                return detailResponse.data;
+            } catch (e) {
+                console.warn(`Skipping recommendation ${summary.id}: Could not fetch details.`);
+                return null;
+            }
+        });
+
+        return (await Promise.all(eventPromises)).filter(Boolean);
+
       } catch (e) {
-        console.error(
-          `Error fetching recommendations for user ${userId}:`,
-          e.message
-        );
+        console.error(`Error fetching recommendations for user ${userId}:`, e.message);
         return [];
       }
     },
+    
+    // NEW RESOLVER: Attending Events (MyEventsScreen tab)
+    attendingEvents: async (parent) => {
+        const userId = parent.user_id || parent.id;
+        if (!userId) return [];
+        try {
+            const response = await axios.get(`${EMS_URL}/events/attending?userId=${userId}`);
+            return response.data; // EMS should return an array of Event objects
+        } catch (e) {
+            console.error(`Error fetching attending events for ${userId}:`, e.message);
+            return [];
+        }
+    },
+    
+    // NEW RESOLVER: Created Events (MyEventsScreen tab)
+    createdEvents: async (parent) => {
+        const userId = parent.user_id || parent.id;
+        if (!userId) return [];
+        try {
+            // Assumes EMS has a REST endpoint: GET /events/created?hostId=...
+            const response = await axios.get(`${EMS_URL}/events/created?hostId=${userId}`);
+            return response.data; // EMS should return an array of Event objects
+        } catch (e) {
+            console.error(`Error fetching created events for ${userId}:`, e.message);
+            return [];
+        }
+    }
   },
 };
 
@@ -176,23 +207,19 @@ const resolvers = {
 
 const server = new ApolloServer({ typeDefs, resolvers });
 const app = express();
+const PORT = 3004;
 
-// Apply GraphQL middleware to a single endpoint
 async function startApolloServer() {
   await server.start();
-
-  // NEW: Use expressMiddleware for modern integration
-  // This automatically sets up the JSON body parsing and context.
+  
   app.use(
-    "/graphql",
-    express.json(), // Ensure body parsing is done before middleware
+    '/graphql',
+    express.json(), 
     expressMiddleware(server)
   );
 
-  app.listen({ port: 3004 }, () => {
-    console.log(
-      `🚀 GraphQL Gateway Service ready at http://localhost:3004/graphql`
-    );
+  app.listen({ port: PORT }, () => {
+    console.log(`🚀 GraphQL Gateway Service ready at http://localhost:${PORT}/graphql`);
   });
 }
 

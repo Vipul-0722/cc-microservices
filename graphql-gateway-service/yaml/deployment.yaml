@@ -38,11 +38,11 @@ spec:
             - containerPort: 3004
           env:
             - name: USS_URL
-              value: "http://user-social-service:80/users"
+              value: "http://user-social-service:80"
             - name: EMS_URL
-              value: "http://event-management-service:80/events"
+              value: "http://event-management-service:80"
             - name: DRS_URL
-              value: "http://discovery-recommendation-service:80/recommendations"
+              value: "http://discovery-recommendation-service:80"
           resources:
             limits:
               cpu: "300m"
